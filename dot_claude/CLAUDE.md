@@ -1,0 +1,3 @@
+- use tree to find out file structure before creating any test or new component
+- don't use any multiline text separators in logs scripts summaries and reports, no ==== no ---- etc. it is just  noise and wastes tokens
+- avoid inline styles in html, prefer css whenever possible for all layout, appearance, themes, sizing needs.

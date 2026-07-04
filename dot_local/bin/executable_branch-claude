@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# branch-claude [<session-id-or-name>] <branch-name>
+# Branch a NON-LIVE claude session into a new tmux window, fully on supported flags:
+#   new window:      claude --resume <orig> --fork-session   (= /branch at launch; new id, original untouched)
+#   current window:  relaunches the original session so you land back where you were
+# Run this AFTER exiting the session you want to branch (a live session cannot be forked externally).
+# With one arg, branches the most recent session in the current directory.
+set -uo pipefail
+
+if [ $# -eq 1 ]; then orig=""; branch="$1"; elif [ $# -eq 2 ]; then orig="$1"; branch="$2"; else
+  echo "usage: branch-claude [<session-id-or-name>] <branch-name>   (run after exiting the session)" >&2; exit 2
+fi
+[ -n "${TMUX:-}" ] || { echo "branch-claude: run inside tmux" >&2; exit 1; }
+command -v claude >/dev/null 2>&1 || { echo "branch-claude: claude not on PATH" >&2; exit 1; }
+
+_slug(){ printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/-\{1,\}/-/g; s/^-//; s/-$//'; }
+slug="$(_slug "$branch")"
+[ -n "$slug" ] || { echo "branch-claude: branch name reduces to empty slug" >&2; exit 1; }
+
+# default: most recent session for this cwd
+if [ -z "$orig" ]; then
+  proj="$HOME/.claude/projects/$(printf '%s' "$(pwd)" | sed 's#/#-#g')"
+  orig="$(basename "$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1)" .jsonl 2>/dev/null || true)"
+  [ -n "$orig" ] || { echo "branch-claude: no sessions found for $(pwd)" >&2; exit 1; }
+fi
+
+# guard: refuse if a live claude already holds this exact session (fork would die / interleave)
+if pgrep -f -- "--resume $orig" >/dev/null 2>&1 || pgrep -f -- "--resume '$orig'" >/dev/null 2>&1; then
+  echo "branch-claude: a running claude already holds '$orig' — exit it first" >&2; exit 1
+fi
+
+# branch window: fork the session (new session id; original untouched). Window name = bus identity.
+wid="$(tmux new-window -dP -F '#{window_id}' -n "$slug" -c "$(pwd)")"
+tmux set-window-option -t "$wid" allow-rename off >/dev/null 2>&1 || true
+tmux set-window-option -t "$wid" automatic-rename off >/dev/null 2>&1 || true
+tmux send-keys -t "$wid" "claude --resume '$orig' --fork-session" Enter
+echo "branch '$slug' forking from '$orig' in new window; relaunching original here..."
+
+# back into the original in THIS window
+exec claude --resume "$orig"

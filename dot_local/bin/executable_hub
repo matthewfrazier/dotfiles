@@ -11,7 +11,9 @@ API="https://agent-hub.tailbe5094.ts.net/api/"
 rpc(){ curl -s -m12 -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer $AGENT_MAIL_JWT" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$API"; }
-tool(){ rpc tools/call "{\"name\":\"$1\",\"arguments\":$2}" | jq -r '.result.content[0].text // (.error.message // "hub: error") '; }
+tool(){ local r; r="$(rpc tools/call "{\"name\":\"$1\",\"arguments\":$2}")"
+  if printf '%s' "$r" | jq -e '.error' >/dev/null 2>&1; then printf '%s\n' "$r" | jq -r '.error.message' >&2; return 1; fi
+  printf '%s' "$r" | jq -r '.result.content[0].text // empty'; }
 
 cmd="${1:-inbox}"; shift || true
 case "$cmd" in

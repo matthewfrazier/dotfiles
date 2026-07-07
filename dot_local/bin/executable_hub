@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# hub — token-lean agent-mail CLI. Digest-first reads, one-line ops.
+#   hub inbox            unread digest: "<id> <from>: <subject>"
+#   hub read <id>        full body of one message
+#   hub send <to>[,to2] <subject> [body]   (body from stdin if omitted; use "-" to force stdin)
+#   hub ack <id>...      acknowledge (mark handled)
+#   hub peers            roster one-liners
+set -uo pipefail
+. "$HOME/.config/agent-mail.env" 2>/dev/null || { echo "hub: no ~/.config/agent-mail.env (enroll first)" >&2; exit 1; }
+API="https://agent-hub.tailbe5094.ts.net/api/"
+rpc(){ curl -s -m12 -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $AGENT_MAIL_JWT" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$API"; }
+tool(){ rpc tools/call "{\"name\":\"$1\",\"arguments\":$2}" | jq -r '.result.content[0].text // (.error.message // "hub: error") '; }
+
+cmd="${1:-inbox}"; shift || true
+case "$cmd" in
+  inbox)
+    tool fetch_inbox "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" \
+      '{project_key:$p,agent_name:$n,registration_token:$t,unread_only:true,include_bodies:false,limit:20}')" \
+      | jq -r '.[]? | "\(.id) \(.from): \(.subject)"'
+    ;;
+  read)
+    [ -n "${1:-}" ] || { echo "usage: hub read <id>" >&2; exit 2; }
+    tool fetch_inbox "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" \
+      '{project_key:$p,agent_name:$n,registration_token:$t,unread_only:false,include_bodies:true,limit:50}')" \
+      | jq -r --argjson id "$1" '.[]? | select(.id==$id) | "FROM \(.from) [\(.subject)]\n\(.body_md)"'
+    ;;
+  send)
+    to="${1:-}"; subj="${2:-}"; [ -n "$to" ] && [ -n "$subj" ] || { echo "usage: hub send <to>[,to] <subject> [body]" >&2; exit 2; }
+    body="${3:-}"; { [ -z "$body" ] || [ "$body" = "-" ]; } && [ ! -t 0 ] && body="$(cat)"
+    tool send_message "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" \
+      --arg to "$to" --arg s "$subj" --arg b "$body" \
+      '{project_key:$p,sender_name:$n,sender_token:$t,to:($to|split(",")),subject:$s,body_md:$b}')" \
+      | jq -r 'if .deliveries then "sent \(.deliveries[0].payload.id) -> \(.deliveries[0].payload.to|join(","))" else . end' 2>/dev/null
+    ;;
+  ack)
+    [ -n "${1:-}" ] || { echo "usage: hub ack <id>..." >&2; exit 2; }
+    for id in "$@"; do
+      tool acknowledge_message "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" --argjson i "$id" \
+        '{project_key:$p,agent_name:$n,registration_token:$t,message_id:$i}')" | jq -r '"acked \(.message_id)"' 2>/dev/null
+    done
+    ;;
+  peers)
+    slug="$(printf '%s' "$AGENT_MAIL_PROJECT" | sed 's#^/##; s#/#-#g')"
+    rpc resources/read "{\"uri\":\"resource://agents/$slug\"}" \
+      | jq -r '.result.contents[0].text' | jq -r '.agents[]? | "\(.name) [\(.task_description // "-")]"'
+    ;;
+  *) sed -n '3,8p' "$0" | sed 's/^# \{0,3\}//' ;;
+esac

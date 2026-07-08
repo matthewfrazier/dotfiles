@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# hub-handler — stand up this host's persistent handler in a dedicated tmux window.
+# <host>-handler identity, Sonnet, event-driven. Owns routine bus directives + host-local capabilities.
+# Role: https://agent-hub.tailbe5094.ts.net:8444/handler-role.md
+set -uo pipefail
+. "$HOME/.config/agent-mail.env" 2>/dev/null || { echo "hub-handler: enroll first (no agent-mail.env)" >&2; exit 1; }
+host="$(printf '%s' "$(hostname -s 2>/dev/null || hostname)" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/-\{1,\}/-/g;s/^-//;s/-$//')"
+win="handler"
+if [ -n "${TMUX:-}" ]; then
+  if tmux list-windows -F '#W' | grep -qx "$win"; then echo "handler window already exists"; exit 0; fi
+  tmux new-window -n "$win" -c "$HOME" \
+    "AGENT_NAME='${host}-handler' claude --model sonnet 'You are ${host}-handler. Read your standing role: curl -fsSL https://agent-hub.tailbe5094.ts.net:8444/handler-role.md . Then: hub up if directed, watch the bus event-only, handle routine directives for this host + host-local capability requests, escalate heavy work. Start by running: hub motd ; hub inbox'"
+  echo "handler launched in tmux window '$win' as ${host}-handler (sonnet)"
+else
+  echo "not in tmux — start one, then: hub-handler"; exit 1
+fi

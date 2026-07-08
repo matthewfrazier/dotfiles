@@ -7,6 +7,7 @@
 #   hub peers            roster one-liners
 #   hub motd             fleet message of the day (daily updates + reminders)
 #   hub up               sync this box: dotfiles + marketplace + plugin (restart session after)
+# companion: hub-handler — launch this host's persistent Sonnet handler (tmux window)
 set -uo pipefail
 . "$HOME/.config/agent-mail.env" 2>/dev/null || { echo "hub: no ~/.config/agent-mail.env (enroll first)" >&2; exit 1; }
 API="https://agent-hub.tailbe5094.ts.net/api/"

@@ -6,6 +6,7 @@
 #   hub ack <id>...      acknowledge (mark handled)
 #   hub peers            roster one-liners
 #   hub motd             fleet message of the day (daily updates + reminders)
+#   hub up               sync this box: dotfiles + marketplace + plugin (restart session after)
 set -uo pipefail
 . "$HOME/.config/agent-mail.env" 2>/dev/null || { echo "hub: no ~/.config/agent-mail.env (enroll first)" >&2; exit 1; }
 API="https://agent-hub.tailbe5094.ts.net/api/"
@@ -43,6 +44,14 @@ case "$cmd" in
       tool acknowledge_message "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" --argjson i "$id" \
         '{project_key:$p,agent_name:$n,registration_token:$t,message_id:$i}')" | jq -r '"acked \(.message_id)"' 2>/dev/null
     done
+    ;;
+  up)
+    # one-shot client sync: dotfiles + marketplace clone + plugin
+    "$HOME/.local/bin/chezmoi" update 2>/dev/null | tail -1
+    mp="$HOME/.local/share/agent-hub-marketplace"
+    [ -d "$mp/.git" ] && GIT_SSH_COMMAND="ssh -i $HOME/.ssh/agent-hub-deploy -o IdentitiesOnly=yes -o BatchMode=yes" git -C "$mp" pull -q 2>/dev/null && echo "marketplace pulled"
+    command -v claude >/dev/null 2>&1 && { claude plugin marketplace update matthewfrazier >/dev/null 2>&1; claude plugin update agent-hub 2>&1 | tail -1; }
+    echo "hub up done — restart the session to load changes"
     ;;
   motd)
     curl -fsSL -m5 https://agent-hub.tailbe5094.ts.net:8444/motd.txt 2>/dev/null || echo "hub: motd unreachable" >&2

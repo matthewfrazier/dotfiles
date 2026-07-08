@@ -5,6 +5,7 @@
 #   hub send <to>[,to2] <subject> [body]   (body from stdin if omitted; use "-" to force stdin)
 #   hub ack <id>...      acknowledge (mark handled)
 #   hub peers            roster one-liners
+#   hub motd             fleet message of the day (daily updates + reminders)
 set -uo pipefail
 . "$HOME/.config/agent-mail.env" 2>/dev/null || { echo "hub: no ~/.config/agent-mail.env (enroll first)" >&2; exit 1; }
 API="https://agent-hub.tailbe5094.ts.net/api/"
@@ -42,6 +43,9 @@ case "$cmd" in
       tool acknowledge_message "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" --argjson i "$id" \
         '{project_key:$p,agent_name:$n,registration_token:$t,message_id:$i}')" | jq -r '"acked \(.message_id)"' 2>/dev/null
     done
+    ;;
+  motd)
+    curl -fsSL -m5 https://agent-hub.tailbe5094.ts.net:8444/motd.txt 2>/dev/null || echo "hub: motd unreachable" >&2
     ;;
   peers)
     slug="$(printf '%s' "$AGENT_MAIL_PROJECT" | sed 's#^/##; s#/#-#g')"

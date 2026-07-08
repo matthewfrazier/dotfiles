@@ -51,7 +51,7 @@ case "$cmd" in
     "$HOME/.local/bin/chezmoi" update 2>/dev/null | tail -1
     mp="$HOME/.local/share/agent-hub-marketplace"
     [ -d "$mp/.git" ] && GIT_SSH_COMMAND="ssh -i $HOME/.ssh/agent-hub-deploy -o IdentitiesOnly=yes -o BatchMode=yes" git -C "$mp" pull -q 2>/dev/null && echo "marketplace pulled"
-    command -v claude >/dev/null 2>&1 && { claude plugin marketplace update matthewfrazier >/dev/null 2>&1; claude plugin update agent-hub 2>&1 | tail -1; }
+    command -v claude >/dev/null 2>&1 && { claude plugin marketplace update matthewfrazier >/dev/null 2>&1; claude plugin update agent-hub@matthewfrazier 2>&1 | tail -1; }
     echo "hub up done — restart the session to load changes"
     ;;
   motd)

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# tmux-persist-setup — install tmux-resurrect + tmux-continuum (idempotent).
+# Config lives in ~/.tmux.conf (chezmoi). Run on enroll and on container boot.
+set -uo pipefail
+P="$HOME/.tmux/plugins"; mkdir -p "$P" "$HOME/.tmux/resurrect"
+command -v git >/dev/null 2>&1 || { echo "tmux-persist: git missing" >&2; exit 1; }
+_c(){ [ -d "$2/.git" ] || git clone -q --depth 1 "$1" "$2" 2>/dev/null; }
+_c https://github.com/tmux-plugins/tmux-resurrect  "$P/tmux-resurrect"
+_c https://github.com/tmux-plugins/tmux-continuum  "$P/tmux-continuum"
+[ -d "$P/tmux-resurrect/.git" ] && [ -d "$P/tmux-continuum/.git" ] \
+  && echo "tmux-persist: resurrect+continuum ready (resumable)" \
+  || { echo "tmux-persist: install incomplete" >&2; exit 1; }
+# if a server is already running, load the plugins now (else next tmux start picks them up)
+tmux run-shell "$P/tmux-resurrect/resurrect.tmux" 2>/dev/null || true
+tmux run-shell "$P/tmux-continuum/continuum.tmux" 2>/dev/null || true

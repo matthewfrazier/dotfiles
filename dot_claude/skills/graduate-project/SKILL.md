@@ -51,23 +51,64 @@ Strip the shared-host coupling and give it its own runtime:
 - **Host-specific values must be remapped** — GPU render/video gids (104/44), device paths. On pve,
   the `dev0/dev1 gid=` mapping makes the in-LXC gids deterministic regardless of the host's gids.
 
-## 4. Own repo + provision the CT
-- Create `matthewfrazier/<project>` (private), commit the extracted+adapted source + a `CLAUDE.md`
-  documenting deploy target, architecture, and host-specific gotchas.
-- Provision the dedicated CT via `local-network-deploy` (sizing, `--features nesting,keyctl` for
-  docker, GPU/kvm passthrough, `--onboot 1`). Deploy the repo, build, verify.
+## 4. Own repo
+- Create `matthewfrazier/<project>` (private). If the source is a fork of someone else's repo (the
+  radio was a clone of `keltokhy/writ-fm`), **fork it** and keep `upstream` wired, rather than
+  pushing their history into a fresh repo — decide this with the operator.
+- Commit the extracted+adapted source + a `CLAUDE.md`/overlay note documenting deploy target,
+  architecture, host gotchas. **Scrub secrets before the first push** (public forks especially):
+  externalize hardcoded passwords to a gitignored env file, gitignore any generated file that embeds
+  tokens (a Jellyfin playlist embedded 500 `api_key`s), ship `.example` templates. `git diff --cached
+  | grep -iE 'password|api_key|token'` before pushing.
 
-## 5. Reboot-resilience (do NOT skip — hard-won)
-A dedicated CT is worthless if it silently dies in the next maintenance reboot (this happened to the
-emulator at the 04:00 pve upgrade — the container had `restart: unless-stopped` but was GONE after
-reboot; homelab #16). Belt AND suspenders:
-- `onboot: 1` on the CT (so the LXC restarts).
-- A **systemd boot service** that `docker compose up -d`s the stack (recreates it even if the
-  container was removed, not just stopped). `After=docker.service`, `Type=oneshot`,
-  `RemainAfterExit=yes`.
-- If it hosts a long-lived agent, also a boot service that launches it (see the agent-session pattern).
+## 5. Provision: clone the pve `agent-template` (the default path)
+Do NOT hand-provision — clone the golden template CT. It is a real PVE feature (`pct clone` of a
+`template: 1` CT; LXC has no cloud-init, so post-clone file injection via `pct exec` is the standard
+mechanism, not a workaround). The template (`agent-template`, currently CT199) already bakes the
+parts that cost real time to discover:
+- **Config-level** (carried by `pct clone`): `/dev/net/tun` passthrough + `nesting,keyctl` features
+  so tailscale runs in **kernel mode** (userspace mode can `serve` inbound but can't reach the
+  tailnet-only hub to enroll — see [[pve-lxc-agent-gotchas]]). No snapshot-section append trap.
+- **Rootfs-level**: claude, docker (+log-rotation `daemon.json`), gh, tree, node, tailscale
+  (logged-out), the reboot-safe agent-session trio, and `~/.claude/settings.json` that defaults the
+  agent to **Sonnet** (`"model":"sonnet"`) + `skipDangerousModePermissionPrompt`. **No baked auth.**
 
-## 6. Cut consumers over — VERIFY the endpoint live first
+One command does clone → identity → project → enrolled → booted (runs on the pve host; raserver
+drives it): `scripts/graduate-clone.sh --id <newid> --name <hostname> [--repo <url>] [--workdir <path>] [--brief <file>]`.
+It clones, sets `hostname`+`onboot:1`, copies claude OAuth creds from a live agent CT
+(container-to-container, never over the wire), sets `AGENT_WORKDIR`+brief+repo, pre-accepts the
+workdir trust, runs the hub enroll (registers on agent-mail under the hostname), and starts the agent.
+
+## 6. Give it its own agent session (identity + brief)
+The graduated project should present as a **Claude Code session titled `<hostname>`** on the fleet
+(tmux session = hostname, enrolled on the bus). The template's trio delivers this reboot-safely
+(verified across a real `pct reboot`):
+- `/root/run-agent.sh` — sources `/root/agent.env` (`AGENT_WORKDIR`), `cd`s there, `exec claude
+  --dangerously-skip-permissions "$(cat /root/agent-brief.md)"`.
+- `/usr/local/bin/launch-agent-tmux.sh` — `tmux new-session -s $(hostname)`, sends
+  `IS_SANDBOX=1 /root/run-agent.sh`.
+- `agent-session.service` — oneshot, `RemainAfterExit`, enabled. (NB: `systemctl restart` kills the
+  session via `KillMode=control-group` — that is NOT the boot path; test resilience with a real reboot.)
+Write a real **brief** (`/root/agent-brief.md`): who it is, what it owns, boundaries (**it's a pve
+guest — request pve/host ops from raserver via the bus**, don't self-drive), and conventions
+(event-only bus monitoring, no heartbeats; **Sonnet default, escalate with `/model` on demand**;
+secrets via the vault). Then `systemctl restart agent-session`.
+
+## Credentials for a graduated agent
+A fresh agent has claude auth (copied) but **no git-push credential or app secrets**. Route these
+through the **Infisical vault** (agent-hub CT106, tailnet-only `https://agent-hub.tailbe5094.ts.net:8450`,
+project `homelab-agent-secrets`) — the vault IS stood up (don't let a stale bus message convince you
+otherwise). Flow: agent creates an empty entry via the `homelab` machine identity → operator commits
+the value in the UI (prod env) → agent reads it via API. For a one-off push, raserver (which holds
+`matthewfrazier` gh auth) can push on the agent's behalf. **Never** paste tokens in chat/bus/code, and
+never repurpose a read-only/wrong-scope key. See [[hub-send-subject-body]] for delivering the request.
+
+## Maintaining the `agent-template`
+The template is read-only. To update it as we learn: `pct clone <tmpl-id> <tmp-id>`, start, patch the
+rootfs, clear identity state (`rm /var/lib/tailscale/tailscaled.state`, any baked creds), stop,
+`pct set --hostname agent-template`, `pct template <tmp-id>`, then destroy the old template CT.
+
+## 7. Cut consumers over — VERIFY the endpoint live first
 - A wrong host:port **fails silently** (tests just fail). Verify the endpoint from OUTSIDE the CT
   (as a real consumer connects) BEFORE handing it out — e.g. `adb connect <ip>:5556` returns a booted
   device.
@@ -76,7 +117,7 @@ reboot; homelab #16). Belt AND suspenders:
 - Add a contention gate if it's now multi-tenant (an ssh+flock lease so two consumers don't drive one
   stateful device at once).
 
-## 7. Retire the old instance
+## 8. Retire the old instance
 - Stop the old copy (keep it as rollback, don't delete yet). If it's a peer agent's host, do this
   JOINTLY.
 - Once consumers are green on the new CT, remove the old container + its image/compose from the shared

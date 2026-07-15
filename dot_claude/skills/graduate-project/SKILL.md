@@ -99,9 +99,20 @@ A fresh agent has claude auth (copied) but **no git-push credential or app secre
 through the **Infisical vault** (agent-hub CT106, tailnet-only `https://agent-hub.tailbe5094.ts.net:8450`,
 project `homelab-agent-secrets`) — the vault IS stood up (don't let a stale bus message convince you
 otherwise). Flow: agent creates an empty entry via the `homelab` machine identity → operator commits
-the value in the UI (prod env) → agent reads it via API. For a one-off push, raserver (which holds
-`matthewfrazier` gh auth) can push on the agent's behalf. **Never** paste tokens in chat/bus/code, and
+the value in the UI (prod env) → agent reads it via API. **Never** paste tokens in chat/bus/code, and
 never repurpose a read-only/wrong-scope key. See [[hub-send-subject-body]] for delivering the request.
+
+**GitHub access is baked into the template** (mechanism, not the secret): `gh-cred.sh` is a git
+credential helper that picks the token by repo OWNER — `GH_TOKEN_MF` for `matthewfrazier/*` (the
+agent's own project repos), `GH_TOKEN_FD` for `flavordrake/*` (devloop commit-back). Both are
+fine-grained PATs pulled from the vault by `graduate-clone.sh` at clone time into
+`/root/.config/gh-tokens.env` — the vault machine-identity lives once on the pve host
+(`/root/.infisical-graduate.env`), only the PATs reach the clone. **Identity hygiene:** flavordrake is
+the operator's pseudonymous PUBLISH identity — commits into the live devloop checkout
+(`/root/.local/share/devloop`) are authored as the flavordrake persona (GitHub noreply) via a
+`.gitconfig` `includeIf`, so committing enhancements back never links the matthewfrazier identity
+publicly. The **devloop plugin is pulled live** (`devloop-sync.sh`), never baked, so agents run the
+latest and can commit improvements straight back to `flavordrake/devloop`.
 
 ## Maintaining the `agent-template`
 The template is read-only. To update it as we learn: `pct clone <tmpl-id> <tmp-id>`, start, patch the

@@ -32,6 +32,10 @@ A graduation is complete ONLY when ALL of these hold, verified live:
 4. **Project builds and runs on the box** (`uv sync` or equivalent passes; the agent can
    develop it interactively).
 5. **Survives a real `pct reboot`** — all of the above self-recover with no manual step.
+6. **Renders Unicode correctly** — `tmux a` shows real `●`/`⏵⏵`/box-drawing, not `_`/`???`. Check
+   `LANG` in the running claude process's env (`en_US.UTF-8`, not `C`) AND
+   `~/.tmux.conf.local` for `@continuum-restore off` (see [[agent-unicode-locale-gotcha]] — two
+   independent causes, both must hold).
 Anything less is an incomplete graduation — don't hand off or report done.
 
 ## 1. Decide (before touching anything)

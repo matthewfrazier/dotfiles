@@ -78,15 +78,22 @@ drives it): `scripts/graduate-clone.sh --id <newid> --name <hostname> [--repo <u
 It clones, sets `hostname`+`onboot:1`, copies claude OAuth creds from a live agent CT
 (container-to-container, never over the wire), sets `AGENT_WORKDIR`+brief+repo, pre-accepts the
 workdir trust, runs the hub enroll (registers on agent-mail under the hostname), and starts the agent.
+CAVEAT on copied creds: OAuth refresh tokens ROTATE — hosts sharing a copied `.credentials.json`
+invalidate each other on refresh (ai-radio silently logged out a day after graduation this way).
+Copy-from-live works for bring-up; the durable fix is a per-host `claude setup-token` from the vault
+(homelab #17). If a graduated session shows "Not logged in", re-copy from the freshest live host.
 
-## 6. Give it its own agent session (identity + brief)
-The graduated project should present as a **Claude Code session titled `<hostname>`** on the fleet
-(tmux session = hostname, enrolled on the bus). The template's trio delivers this reboot-safely
-(verified across a real `pct reboot`):
+## 6. Give it its own agent session (identity + brief + remote control)
+The graduated project's end state is a **Remote-Control-registered Claude session named
+`<hostname>`** — visible in the operator's mobile/web Claude Code session list ("Connected ·
+Remote control") — reachable locally by a bare **`tmux a`** on the host. The template's trio
+delivers this reboot-safely (verified across a real `pct reboot`):
 - `/root/run-agent.sh` — sources `/root/agent.env` (`AGENT_WORKDIR`), `cd`s there, `exec claude
-  --dangerously-skip-permissions "$(cat /root/agent-brief.md)"`.
-- `/usr/local/bin/launch-agent-tmux.sh` — `tmux new-session -s $(hostname)`, sends
-  `IS_SANDBOX=1 /root/run-agent.sh`.
+  --dangerously-skip-permissions --remote-control "$(hostname)" "$(cat /root/agent-brief.md)"`.
+  The `--remote-control` flag is what puts the session on the operator's phone — a graduation
+  isn't done until the operator can see it there.
+- `/usr/local/bin/launch-agent-tmux.sh` — `tmux new-session -s main` (plain name, so `tmux a`
+  attaches with zero ceremony), sends `IS_SANDBOX=1 /root/run-agent.sh`.
 - `agent-session.service` — oneshot, `RemainAfterExit`, enabled. (NB: `systemctl restart` kills the
   session via `KillMode=control-group` — that is NOT the boot path; test resilience with a real reboot.)
 Write a real **brief** (`/root/agent-brief.md`): who it is, what it owns, boundaries (**it's a pve

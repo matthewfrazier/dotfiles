@@ -21,6 +21,19 @@ host, or it just deserves its own identity. Graduating = give it a dedicated CT,
 name for what it IS, reboot-resilience, then retire the old instance. Do NOT confuse with
 `migrate-container` (that's a faithful lift-and-shift of one container between hosts).
 
+## Definition of done (the default correct outcome — operator-set 2026-07-16)
+A graduation is complete ONLY when ALL of these hold, verified live:
+1. **Operator sees it on their phone**: a session named `<hostname>` shows in the Claude Code
+   mobile/web session list as "Connected · Remote control" (launched with
+   `--remote-control "$(hostname)"`).
+2. **Bare `tmux a` works**: ssh to the host, run `tmux a`, land in the running project session
+   (tmux session is plainly named `main` — never a special per-host name).
+3. **Project services reachable** from outside the CT (its URLs return 200).
+4. **Project builds and runs on the box** (`uv sync` or equivalent passes; the agent can
+   develop it interactively).
+5. **Survives a real `pct reboot`** — all of the above self-recover with no manual step.
+Anything less is an incomplete graduation — don't hand off or report done.
+
 ## 1. Decide (before touching anything)
 - **Why graduate?** Shared-resource contention (two consumers want it), blast-radius (it crashes the
   host — the emulator's SwiftShader zombies took down fd-dev), or identity (it's a distinct product

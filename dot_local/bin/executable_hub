@@ -9,13 +9,18 @@
 #   hub up               sync this box: dotfiles + marketplace + plugin (restart session after)
 # companion: hub-handler — launch this host's persistent Sonnet handler (tmux window)
 set -uo pipefail
-. "$HOME/.config/agent-mail.env" 2>/dev/null || { echo "hub: no ~/.config/agent-mail.env (enroll first)" >&2; exit 1; }
+# HUB_ENV overrides which identity file to use — for hosts running multiple bus identities (e.g.
+# raserver-IT default + raserver-homelab fleet-controller): HUB_ENV=~/.config/agent-mail/homelab.env hub send ...
+ENV_FILE="${HUB_ENV:-$HOME/.config/agent-mail.env}"
+. "$ENV_FILE" 2>/dev/null || { echo "hub: no $ENV_FILE (enroll first, or check HUB_ENV)" >&2; exit 1; }
 API="https://agent-hub.tailbe5094.ts.net/api/"
 rpc(){ curl -s -m12 -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer $AGENT_MAIL_JWT" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$API"; }
 tool(){ local r; r="$(rpc tools/call "{\"name\":\"$1\",\"arguments\":$2}")"
   if printf '%s' "$r" | jq -e '.error' >/dev/null 2>&1; then printf '%s\n' "$r" | jq -r '.error.message' >&2; return 1; fi
+  # MCP tool errors come back as result.isError (not JSON-RPC .error) — surface them, don't swallow
+  if printf '%s' "$r" | jq -e '.result.isError==true' >/dev/null 2>&1; then printf '%s\n' "$r" | jq -r '.result.content[0].text' >&2; return 1; fi
   printf '%s' "$r" | jq -r '.result.content[0].text // empty'; }
 
 cmd="${1:-inbox}"; shift || true
@@ -34,6 +39,15 @@ case "$cmd" in
   send)
     to="${1:-}"; subj="${2:-}"; [ -n "$to" ] && [ -n "$subj" ] || { echo "usage: hub send <to>[,to] <subject> [body]" >&2; exit 2; }
     body="${3:-}"; { [ -z "$body" ] || [ "$body" = "-" ]; } && [ ! -t 0 ] && body="$(cat)"
+    # server caps subject ~180 chars and SILENTLY truncates. Never lose text: if the subject is
+    # oversized, keep the full text in the body and use a short preview as the subject.
+    if [ "${#subj}" -gt 160 ]; then
+      full="$subj"; subj="$(printf '%s' "$subj" | head -c 60 | tr '\n' ' ' | sed 's/[[:space:]]*$//')…"
+      if [ -z "$body" ]; then body="$full"; else body="$full
+
+$body"; fi
+      echo "hub: subject >160 chars — moved full text to body, subject is now a preview (use a short TYPE: subject)" >&2
+    fi
     tool send_message "$(jq -nc --arg p "$AGENT_MAIL_PROJECT" --arg n "$AGENT_MAIL_NAME" --arg t "$AGENT_MAIL_TOKEN" \
       --arg to "$to" --arg s "$subj" --arg b "$body" \
       '{project_key:$p,sender_name:$n,sender_token:$t,to:($to|split(",")),subject:$s,body_md:$b}')" \
